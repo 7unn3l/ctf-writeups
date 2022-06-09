@@ -1,19 +1,25 @@
 # Writeup for Hide and Seek
 
+| Category        | Author         | Points   | Solves (junior) | Difficulty rating |
+| -------------   | -------------  | ------   | ------          |  ----- |
+| rev          | lion           | 258      | 18               | Easy |
+
+
 ## Preface
 
-In this reversing challenge from lion, we examine a self modifying ELF executable that hides the flag via forking and printing to dev/null. The challenge just provided a file called `hide_and_seek` while the description said `Nothing compares to a good game of hide and seek`. I used IDA on windows and WSL to solve this challenge.
+In this reversing challenge, we examine a self modifying ELF executable that hides the flag via forking and printing to dev/null. The challenge just provided a file called `hide_and_seek` while the description said `Nothing compares to a good game of hide and seek`. I used IDA on windows and WSL to solve this challenge.
 
 ## Dynamic analysis
 
 Lets first begin by looking at what we have in front of us. Running `file hide_and_seek` gives us
-```
+
+```console
 hide_and_seek: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=75be4e4fef0160aa66f45b87a408c334fdd1a305, for GNU/Linux 3.2.0, stripped
 ```
 
 So we have an executable file here, lets mark it executable and run it
 
-```
+```console
 user@lnx:~/cscg/rev/hide_and_seek$ chmod +x hide_and_seek
 user@lnx:~/cscg/rev/hide_and_seek$ ./hide_and_seek 
 Hello!
@@ -24,7 +30,7 @@ https://www.youtube.com/watch?v=oHg5SJYRHA0user@lnx:~/cscg/rev/hide_and_seek$
 alright. As you can already guess, that's a link to a rickroll. Where do we go from here? I usually try
 dynamic analysis first, since it is often times easier. Lets utilize `strace` to trace all system calls that the program does. This often times yields behavior that one cant observe with just running in the shell.
 
-```
+```console
 user@lnx:~/cscg/rev/hide_and_seek$ strace ./hide_and_seek
 
 <snip>
@@ -98,7 +104,7 @@ We see a lot of variables initializations, notice that `v26` is again used for s
 This function is way more simple than it looks. We begin be checking if the file descriptor, which is the only argument supplied to this function, is greater then zero. If so, we continue into a while loop. Looking carefully, we can see that we iterate over `v1`, perform some calculations based on a `v3` and add the result to `v2` for all characters of the string. After that, we compare `v2` to some fixed value and only if matches, we execute the next functionality of the code. Just thinking of the general procedure, an integrity check comes to mind. Lets rewrite this function in python:
 
 
-```
+```python
 >>>check = lambda s : sum([3533 * ord(x) + 3 for x in s])
 >>> print(check("Hello!\nHere is your flag:\n"))
 7730282
@@ -176,8 +182,8 @@ At this point I really hoped to not be required to untangle all the if cases. Tu
 
 With all this additional knowledge, lets take another look at the behavior of the binary. This time, I really wanted to know what each child process does and after a bit of searching the internet, I found out about the beautiful `strace -ff -o`! (I would have probably been much quicker consulting the man page of strace though, tbh). With this option strace will trace every spawned child separately and even log it to a use supplied file name. So, lets go:
 
-```
-strace -ff -s 500 -o traces/trace ./hide_and_seek 
+```console
+user@lnx:~/cscg/rev/hide_and_seek$ strace -ff -s 500 -o traces/trace ./hide_and_seek 
 ```
 
 I used `-s 500` to increase the length of the strings that strace shows. Now lets look at the output that we've got:
