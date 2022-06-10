@@ -7,7 +7,8 @@
 
 ## 2022
 
-### CSCG
+### CSCG Junior Quals
 
 - ![yet-another-printf](2022/cscg/pwn/yet-another-printf)
 - ![hide and seek](2022/cscg/rev/hide_and_seek)
+- ![mainframe](2022/cscg/net/mainframe)
