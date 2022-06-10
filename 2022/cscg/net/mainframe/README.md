@@ -222,7 +222,3 @@ exploit('fc0b281991732588bef82415','cat flag.txt')
 ```
 
 When decoding the Server response we get `CSCG{7c2b8792f6dea3f8d642e6480acda3e2}`
-
-## Mitigation
-
-Since there is no bug used here, mitigations do not apply.
