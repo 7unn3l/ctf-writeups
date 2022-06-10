@@ -232,16 +232,30 @@ fills a buffer of size 256 chars (just enough to fit all byte values) with
 that many `"X"` chars and prints the buffer. So for example consider:
 
 ```c
-long 64bitval = 0x1122334455667788;
-long* ptr = &64bitval;
+long val = 0x1122334455667788;
+long* ptr = &val;
 
 printf("%p",ptr);
 ```
 
 The program with the patched glibc would output `0x88 = 136` the character `"X"`.
 
-The second functionality patched is concerned with the `%n` formatter.
+The second functionality patched is concerned with the `%n` formatter, we can deduce that
+by looking at the surrounding code of the patched snippet, where we find a comment stating
+`"answer the number of chars written"`. One can see that normal pointer expressions are changed
+to double pointer ones. Normally, `%n` writes the number of bytes printed so far in the corresponding
+printf call to the memory location pointed to by the next argument. In this patched version, we follow
+the pointer two times, perfomring two derefs. So
+```c
+int val = 0x1122334455667788;
+int* ptr = &val;
+int** ptr1 = &ptr;
 
-TODO...
+printf("123%n",ptr1);
+```
+
+would result in `val = 3`.
 
 ## Assessing the situation
+
+
