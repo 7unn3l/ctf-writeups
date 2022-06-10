@@ -110,7 +110,7 @@ There also exists a function `success` which exits with code 0.
 Lets look also look at the binary in its compiled form. We can extract the compilation flags from `build/Makefile` :
 `CFLAGS=-Wl,-z,relro,-z,now -pie`. These result in
 
-```terminal
+```console
 user@lnx:~/cscg/pwn/yet-another-printf/deploy$ file yap 
 yap: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=7f83bf152166dc37885c84a3efe33d9348fbcfcf, for GNU/Linux 3.2.0, not stripped
 user@lnx:~/cscg/pwn/yet-another-printf/deploy$ checksec yap
