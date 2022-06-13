@@ -114,7 +114,7 @@ Lets look also look at the binary in its compiled form. We can extract the compi
 user@lnx:~/cscg/pwn/yet-another-printf/deploy$ file yap 
 yap: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=7f83bf152166dc37885c84a3efe33d9348fbcfcf, for GNU/Linux 3.2.0, not stripped
 user@lnx:~/cscg/pwn/yet-another-printf/deploy$ checksec yap
-[*] '/home/maxi/cscg/pwn/yet-another-printf/deploy/yap'
+[*] '/home/usr/cscg/pwn/yet-another-printf/deploy/yap'
     Arch:     amd64-64-little
     RELRO:    Full RELRO
     Stack:    No canary found
@@ -238,9 +238,9 @@ long* ptr = &val;
 printf("%p",ptr);
 ```
 
-The program with the patched glibc would output `0x88 = 136` the character `"X"`.
+The program with the patched glibc would output `0x88 = 136` times the character `"X"`.
 
-The second functionality patched is concerned with the `%n` formatter, we can deduce that
+The second functionality patched is concerned with the `%n` formatter. We can deduce this
 by looking at the surrounding code of the patched snippet, where we find a comment stating
 `"answer the number of chars written"`. One can see that normal pointer expressions are changed
 to double pointer ones. Normally, `%n` writes the number of bytes printed so far in the corresponding
@@ -258,4 +258,34 @@ would result in `val = 3`.
 
 ## Assessing the situation
 
+We have an obvious format string vulnerability but no output. Our goal is to redirect
+the control flow to the success function. ASLR and PIE is enabled, so we have to somehow
+predict the address of success. The exploit hast to succeed 5 times in succession, so stability
+is a concern here. The modified behavior could help in this blind situation.
 
+## Setup
+
+I always like to ensure a debugging setup that is close to the remote environment.
+One Important thing to note is that environment variables influence stack offsets.
+Luckily, the challenge binary is run with 
+```python
+rv = subprocess.run(["./yap"], input=code, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={})
+```
+``env={}`` leads to the program being run without any env vars set. This leads to the stack offsets being much
+more reliable.
+
+Also, I want to run gdb on the same operating system version, so we are going to run gdb in the docker container.
+Lets create a gdb command file that will setup some simple things:
+
+```
+file ./yap
+unset environment
+```
+
+thats it. I've modified the Dockerfile so it installs gdb and pwntools and adds this
+file to the workdir. Inside the container we can then run gdb -x <file> to start
+debugging the binary as it would run on remote.
+
+## Stack layout and disassembly
+
+Lets begin by looking at how the binary works in assembly.
