@@ -312,4 +312,4 @@ and hope the time window is big enough!
 
 It surely was! The time window between the time of check and the time of use was really big enough
 for us to do four transactions of all of our transaction funds. Lets visit the promo page and grab that
-free gift! And we got the flag!CSCG{Inf1niteMon3y}
+free gift! And we got the flag! `CSCG{Inf1niteMon3y}`
