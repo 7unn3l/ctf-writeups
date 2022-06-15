@@ -343,7 +343,7 @@ break fprintf
 This enabled me to examine the addresses of `reg0` and the saved `rip` repeatedly. Lets have a look at some samples:
 
 |val of reg2|addr of saved rip|
-|.|.|
+|-|-|
 |0x7ffde38537a0|0x7ffde3852798|
 |0x7ffc3856bb00|0x7ffc3856aaf8|
 |0x7fff81e63938|0x7fff81e64940|
@@ -376,7 +376,7 @@ This time we have to use `r > /dev/null` in gdb to run the program with redirect
 Where do we go from here? We did not redirect code execution yet. But we have a pointer at a location that we can access that points to the saved return pointer. We now just need to overwrite it. But what do we write? Lets sample addresses from both the saved `rip` and `success` functions.
 
 |addr of saved ret ptr|addr of success|
-|.|.|
+|-|-|
 |0x55dea8f4c267|0x55dea8f4c271|
 |0x55ef61d7e267|0x55ef61d7e271|
 |0x559b15fbd267|0x559b15fbd271|
