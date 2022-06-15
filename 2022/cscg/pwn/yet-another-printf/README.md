@@ -7,7 +7,8 @@
 ## Preface
 
 I did not solve this challenge during the ctf. I got quite close but in the end my exploit was not reliable enough.
-I do want to showcase this challenge since it is pretty awesome in my opinion.
+I do however want to showcase this challenge since it is pretty awesome in my opinion. We are exploiting a format
+string vulnerability without any output on an ASLR+PIE enabled binary with a modified fprintf behavior.
 
 ## Overview
 
@@ -319,3 +320,89 @@ Since `fgets` with a safe size is used, we cant overflow the buffer here. But re
 we find out where the saved return pointer is. (remember, ASLR + PIE is enabled, thus the stack location is randomized)
 
 ### finding the return pointer
+
+Since we want to overwrite it, it would be nice to somehow get its address. For a start, it is always useful to have pointer to the stack on the
+stack itself, as you will notice throughout this writeup. Conveniently, there are already three pointers to the stack, namely `reg0`,`reg1` and `reg2`.
+Lets look at how far the address saved in `reg2` and the stack address of the saved return pointer are apart. Looking at the screenshot above, we can
+conclude that the distance is `(reg2)0x7fffffffed20 - (ret ptr addr)0x7fffffffdd18 = 0x1008 = 4104 Bytes`. While the stack addresses may be random,
+the offset is static because the placement of local variables is deterministic here. For the exploit, we abuse exactly that property.
+
+So if we could somehow subtract 4104 from `reg2`, we would have a pointer on the stack pointing to the saved `rip`. We could then use `%n` to write to
+the return pointer. But how do we actually subtract from and unknown address without any leaks whatsoever? Turns out it is possible with the primitives
+given by the modified `fprintf` but I just didn't figure it out during the ctf. Lets look at my solution first.
+
+## An unreliable exploit
+
+I began by looking how the addresses of interest changed during executions. GDB disables randomization by default, but we can use a file with the contents
+```
+file yap
+unset environment
+set disable-randomization off
+break fprintf
+```
+This enabled me to examine the addresses of `reg0` and the saved `rip` repeatedly. Lets have a look at some samples:
+
+|val of reg2|addr of saved rip|
+|.|.|
+|0x7ffde38537a0|0x7ffde3852798|
+|0x7ffc3856bb00|0x7ffc3856aaf8|
+|0x7fff81e63938|0x7fff81e64940|
+|0x7ffd2c674640|0x7ffd2c673638|
+
+We notice something here. Although randomized, only the last two bytes are different between each pair of `reg2` and the saved `rip`. If we would
+sample even more we would also notice that the last byte of each address is always a multiple of 16. This is because by default in the x86_64 architecture,
+stack addresses are 16 byte aligned.
+
+Since we cannot (we can actually but I could not) subtract from `reg2`, lets just guess these two last bytes! We would need to guess a whole byte and on
+top of that one of `256 / 16 = 16` values, yielding a total success probability of `1/256*1/16` which is approximately `0.0244 %`. How would we do this?
+
+We first want to write to `reg2`. Because of the modified double pointer behavior of `%n`, we have to give `reg0` as an argument to let fprintf write to the value of `reg2`. To "guess" the two byte difference, we could simply use a static value. Lets use the one that
+we got from the randomization disabled gdb session, so `0xdd18`. How do we get `%n` to write this value? Easy! Just print `0xdd18 = 56600 chars`. Luckily,
+stdout points to `/dev/null` so we cant print tons of characters very quickly.
+
+Next we need to know at which offset `reg0` is on the stack. We can find out by using `%X$lx` where `X` is the stack offset of the argument we want to print and `lx` is a formatter for printing a long, meaning 8 bytes in this context, in hexadecimal form. After some playing around we find that `reg0` is at offset 519, so fprintf's 519th argument. (generally,`%<index>$<formatter>` can be used to specify a direct argument index instead of taking the next argument)
+
+Lets try putting it all together. We can write 56600 chars with `%56600c` which will interpret the next argument of fprintf as character and print it padded with spaces to a total length of 56600. Our payload looks like this:
+
+```python
+payload =  "%56600c" # get the correct value in %n
+payload += "%519$hn" # write to reg0. Use hn instead of n to write only two bytes instead of 4.
+```
+
+This time we have to use `r > /dev/null` in gdb to run the program with redirected output to `/dev/null` additionally to using the run file. If we break at the end of fprintf, before the `ret` and observe the stack we see that `reg2` now points to the saved `rip` 🎉
+
+![](img/reg2_changed.png)
+
+Where do we go from here? We did not redirect code execution yet. But we have a pointer at a location that we can access that points to the saved return pointer. We now just need to overwrite it. But what do we write? Lets sample addresses from both the saved `rip` and `success` functions.
+
+|addr of saved ret ptr|addr of success|
+|.|.|
+|0x55dea8f4c267|0x55dea8f4c271|
+|0x55ef61d7e267|0x55ef61d7e271|
+|0x559b15fbd267|0x559b15fbd271|
+|0x56453a527267|0x56453a527271|
+
+Great! We see that only the last byte differs. And this offset is static! So we always want to overwrite the last byte with `0x71`. The char counter in fprintf is currently at `0xdd18`. Lucky for us, since we can just print another `0x71 - 0x18 = 0x59 = ` bytes to set the last byte of the fprintf char count
+to the required value. We then utilize `%hhn` to only write one byte. This time we have to select `reg1` at stack offset 520 to not write to reg2, but to the saved return pointer itself. Lets assemble the whole exploit string:
+
+```python
+payload =  "%56600c"  # get the correct value in %n
+payload += "%519$hn"  # write to reg0. Use hn instead of n to write only two bytes instead of 4.
+payload += "%89c"     # set char counter & 0xFF to correct value
+payload += "%520$hhn" # overwrite last byte of saved rip
+```
+
+Lets again use `r > /dev/null`, enter the full exploit string and continue. We are still in the non randomized gdb session.
+
+```
+<....>
+Continuing.
+[Inferior 1 (process 156) exited normally]
+pwndbg> print $_exitcode
+$1 = 0
+pwndbg> 
+```
+
+We did redirect code execution! Sadly this was not enough for the challenge since the exploit has to work 5 times in succession and given the low probability of correctly hitting the stack address of the saved return pointer, I was not able to get a 5/5 during the ctf.
+
+## A better exploit
