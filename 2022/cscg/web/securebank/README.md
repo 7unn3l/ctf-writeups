@@ -69,21 +69,21 @@ master.cscg.live)|147.75.32.185|:31337...verbunden.
 10 user@lnx:~$
 ```
 Alright. We really just could access the database from the web root. Lets look at whats in the database,
-
 using https://inloop.github.io/sqlite-viewer/
 
 
+![](img/hash.png)
+
 Now lets use another online service (https://crackstation.net/) to crack the hash because we are lazy:
+
+![](img/crack.png)
 
 Armed with the valid login credentialsjohn:johndoewe can now proceed.
 
 
-Exploiting the race condition
-
+## Exploiting the race condition
 The first thing I did was look for a sink that could give me the flag. Since the database does not contain
-
 it, we can conclude that we dont have to perform an sql injection. It became apparent when looking at
-
 /src/include/promo.php
 
 ```php
@@ -109,13 +109,12 @@ $_ENV["PROMOCODE"] ?></b></p>
 15 endif;
 ```
 “a free gift”, sounds good. Lets try to increase our balance to 25 out of nothing. Lets first log in and look
-
 at the users current bank accounts and balance:
 
+![](img/overview.png)
+
 Seems like we have two accounts with a total balance of 20 EUR. 5 EUR short of getting the flag, very
-
 unfortunate. The transfer page looks interesting. Lets look at the code that gets executed after the
-
 amount and source and destination account are validated, as this is the code of interest:
 
 src/includes/transfer.php:
@@ -186,46 +185,27 @@ SQLITE3_TEXT);
 50 }
 ```
 Looking at this we notice some important things:
-
 1. All sql statements are properly secured. So SQL Injection does not seem possible
-
 2. Line 14: we extract the senders current balance
-
 3. Line 23-26: we calculate a hash of the transaction
-
-4.Line 38-39: the current balance is recalculated via subtracting the send amount from the previ-
-
-ously extractedcurrent_balanceand then inserted back into the database in line 42
-
+4.Line 38-39: the current balance is recalculated via subtracting the send amount from the previously
+extractedcurrent_balanceand then inserted back into the database in line 42
 We can see a very typical race condition pattern here. The time of check differs from the time of use,
-
 and no locks are applied. In this case, the check happens in line 14, where the application checks the
-
 users current balance. This value is then used much later in the code in line 42, without a guarantee
-
 that this value still reflects reality.
-
 Lets imagine a scenario where a user makes two requests in parallel and the application supports
-
 multithreading. Lets say the requests arrive with some small delay and both requests want to start
-
 a transfer of 5 EUR from an account that has exactly 5 EUR. When the first thread handling the first
-
 requests arrives at line, lets say 20, the second thread may reach line 14, because of the delay. Now
-
 both threads essentially “think” that the user still has 5 EUR left in his account and will both send
-
 exactly 5 EUR to the destination account. We end up in a situation where we just transferred 10 EUR
-
 from an account that has only 5 EUR in it. This is of course scalable. Lets try this on our target.
 
-
-executing the attack
+## Executing the attack
 
 It is important to note, that php will use one thread per session in this case. If we want to trigger the
-
 race condition, we have to create multiple sessions where we can send requests in parallel. Lets build
-
 code that authenticates the user and returns the session id:
 
 ```python
@@ -245,11 +225,8 @@ cscg.live:31337/'
 12 return cookies
 ```
 easy. We just authenticate with a post request and get a session cookie back. Now we need to initiate
-
 a transfer. Looking back at the screenshot from the account info page, we can see that we have two
-
 accounts. We can take all the required parameters for an transaction from there and use the html at
-
 the end of /src/includes/transfer.php to verify the required form parameters:
 
 ```html
@@ -279,7 +256,6 @@ $account_number): ?>
 ```
 
 With the parameters in mind, we can create this python function that initiates a transfer from our
-
 transaction account to the savings account:
 
 ```python
@@ -295,9 +271,7 @@ get_session(),data=data)
 9 Thread(target=g).start()
 ```
 We use threading here to make the function non blocking and return immediately. Putting everything
-
 together, we now need to call the transfer function in succession with n=5 EUR, so that we may transfer
-
 more money then we actually have in our savings account. Lets put the whole script together
 
 ```python
@@ -332,12 +306,10 @@ get_session(),data=data)
 26 transfer(5)
 ```
 In the last two lines we initiate a transaction of 5 EURO 4 times in quick succession. Lets fire the exploit
-
 and hope the time window is big enough!
 
+![](img/trans.png)
 
 It surely was! The time window between the time of check and the time of use was really big enough
-
 for us to do four transactions of all of our transaction funds. Lets visit the promo page and grab that
-
 free gift! And we got the flag!CSCG{Inf1niteMon3y}
