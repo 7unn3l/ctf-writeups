@@ -280,12 +280,42 @@ Lets create a gdb command file that will setup some simple things:
 ```
 file ./yap
 unset environment
+break fprintf
 ```
 
 thats it. I've modified the Dockerfile so it installs gdb and pwntools and adds this
 file to the workdir. Inside the container we can then run gdb -x <file> to start
 debugging the binary as it would run on remote.
 
-## Stack layout and disassembly
+## Stack layout
 
-Lets begin by looking at how the binary works in assembly.
+Lets begin by looking at how the binary works in assembly. Since the `code` buffer is 4096 bytes big, lets just fill it up completely. Since we now that `reg2` is pointing to the last 16 bytes of our supplied buffer, we can verify this observation by using 4096-16 A's and 16 B's. Lets run the program (with the gdb file), break at the beginning of printf and examine the stack:
+
+![](img/stack.jpg)
+
+Okay, there is a lot going on here. Lets go through it step by step. In the top half one can see the buffer I just given as the first argument to fprintf, ending with 16 B's. Beneath that you can see that we hit the beginning of fprintf. Lets skip the registers for now. In the disassembly frame we see we indeed are at the first instruction of the fprintf function. Now for the most important detail: The stack. We can see that the top most item on the stack currently is the saved instruction pointer where we return to when fprintf finishes. It is logical, that it points into `main`. Underneath that, we can see the beginning of our code buffer.
+
+Since we only see the beginning of our buffer, lets print more of the stack. Our buffer is 4096 bytes big, meaning there should be `4096 / 8 = 512`. Lets print a bit more stack items so we also see what comes before it:
+
+![](img/stack_full.png)
+
+The `"509 skipped"` means that the A's repeat until we finally reach our last 16 B's beginning at stack address `0x7fffffffed20`. So far so good. What about
+the registers? They're lying on the stack directly after! And we can even verify our assumption: `reg0` is at stack address `0x7fffffffed30`. It points to `reg1` at stack offset `38`, which in turn points to `reg2` at offset `40` which itself points to stack offset `20`, meaning the last 16 bytes at `0x7fffffffed20`! Perfect.
+
+## Exploiting
+
+
+### The goal
+
+Lets first define our goal. We just have to redirect execution flow to the `success` function, so we don't need a shell. The easiest and most obvious way would be to gain control of the instruction pointer, `rip`. I am very sure there are some other fancy methods and a challenge, especially a binary exploitation one, can often be solved in many ways but this is the approach I went for.
+
+### The method
+
+A nice way to do this is to overwrite the saved return address that we saw earlier when looking at the stack layout. If we manage to put the address of `success` in there, the `ret` instruction will pop it from the stack right into `rip` and we would jump to `success` and thus call `exit(0)`.
+
+With buffer overflows, this is a common technique. If the buffer to overflow is a local variable on the stack, the return address is placed first in memory and because of the stack growing downwards, the buffer is then placed at a lower memory location but grows upwards, enabling it to overflow and change the saved return pointer.
+
+Since `fgets` with a safe size is used, we cant overflow the buffer here. But remember `%n`? We can write to memory with that. So we might have a chance if
+we find out where the saved return pointer is. (remember, ASLR + PIE is enabled, thus the stack location is randomized)
+
+### finding the return pointer
