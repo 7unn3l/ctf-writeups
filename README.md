@@ -12,3 +12,4 @@
 - ![yet-another-printf](2022/cscg/pwn/yet-another-printf)
 - ![hide and seek](2022/cscg/rev/hide_and_seek)
 - ![mainframe](2022/cscg/net/mainframe)
+- ![securebank](2022/cscg/web/securebank)
