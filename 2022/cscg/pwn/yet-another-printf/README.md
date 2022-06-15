@@ -555,6 +555,6 @@ while True:
 
 Lets run it against the challenge server:
 
-![](/img/offen.png)
+![](img/offen.png)
 
-And we got it! After approximately 30 seconds the exploit executes 5 times in a row.
+And we got it! After approximately 30 seconds the exploit executes 5 times in a row. Thanks to @lion for this awesome challenge! It was my first non intro pwn :D
