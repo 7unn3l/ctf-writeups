@@ -1,5 +1,7 @@
 # ctf-writeups
 
+I also post writeups on my blog, tunn3l.pro
+
 ## 2021
 
 ### cyber security rumble
